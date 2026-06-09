@@ -40,7 +40,8 @@ button{
 
 #chat{
   display:none;
-  height:100vh;
+  height:100dvh;
+  flex-direction:column;
 }
 
 .header{
@@ -59,11 +60,18 @@ button{
 }
 
 #messages{
-  height:65vh;
+  flex:1;
   overflow-y:auto;
   padding:10px;
   display:flex;
   flex-direction:column;
+}
+
+.bottom{
+  position:sticky;
+  bottom:0;
+  background:#0f172a;
+  padding:10px;
 }
 
 .message{
@@ -115,9 +123,35 @@ audio{
     height:60vh;
   }
 }
+audio{
+  border-radius:20px;
+}
+
+details summary{
+  outline:none;
+  cursor:pointer;
+}
+
+details summary::-webkit-details-marker{
+  display:none;
+}
 </style>
 </head>
+<div id="viewer"
+style="
+display:none;
+position:fixed;
+inset:0;
+background:black;
+justify-content:center;
+align-items:center;
+z-index:9999;">
 
+<img id="viewerImg"
+style="
+max-width:95%;
+max-height:95%;">
+</div>
 <body>
 
 <div id="login">
@@ -149,6 +183,22 @@ audio{
   </div>
 
 </div>
+<div id="viewer"
+style="
+display:none;
+position:fixed;
+inset:0;
+background:black;
+justify-content:center;
+align-items:center;
+z-index:9999;">
+
+<img id="viewerImg"
+style="
+max-width:95%;
+max-height:95%;">
+
+</div>
 
 <script src="/socket.io/socket.io.js"></script>
 
@@ -169,7 +219,7 @@ function join(){
   socket.emit("join-room",room);
 
   document.getElementById("login").style.display="none";
-  document.getElementById("chat").style.display="block";
+  document.getElementById("chat").style.display="flex";
 }
 
 function send(){
@@ -182,6 +232,7 @@ function send(){
   add("Me",input.value);
 
   input.value="";
+  input.focus();
 }
 
 document.getElementById("msg").addEventListener("keydown",function(e){
@@ -230,7 +281,22 @@ function add(user,text){
     div.classList.add("her");
   }
 
-  div.innerHTML=`<b>${user}</b><br>${text}`;
+  const time=new Date().toLocaleTimeString([],{
+  hour:"2-digit",
+  minute:"2-digit"
+});
+
+div.innerHTML=`
+<b>${user}</b><br>
+${text}
+<div style="
+font-size:11px;
+opacity:.7;
+text-align:right;
+margin-top:5px;">
+${time}
+</div>
+`;
 
   document.getElementById("messages").appendChild(div);
 
@@ -272,7 +338,7 @@ function addImage(user,url){
 
   div.innerHTML=`
   <b>${user}</b><br>
-  <img src="${url}" onclick="window.open('${url}','_blank')">
+  <img src="${url}" onclick="openImage('${url}')">
   `;
 
   document.getElementById("messages").appendChild(div);
@@ -352,9 +418,54 @@ function addAudio(user,url){
     div.classList.add("her");
   }
 
+  const time=new Date().toLocaleTimeString([],{
+    hour:"2-digit",
+    minute:"2-digit"
+  });
+
   div.innerHTML=`
-  <b>${user}</b><br>
-  <audio controls src="${url}"></audio>
+  
+  <div style="
+  font-size:13px;
+  margin-bottom:6px;">
+  🎤 Voice Message
+  </div>
+
+  <audio controls
+  style="
+  width:100%;
+  height:38px;">
+    <source src="${url}">
+  </audio>
+
+  <div style="
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-top:6px;
+  font-size:11px;
+  opacity:0.8;">
+
+    <span>${time}</span>
+
+    <details>
+      <summary style="
+      cursor:pointer;
+      list-style:none;
+      font-size:16px;">
+      ⋮
+      </summary>
+
+      <a href="${url}" download
+      style="
+      text-decoration:none;
+      color:white;">
+      ⬇ Download
+      </a>
+    </details>
+
+  </div>
+  
   `;
 
   document.getElementById("messages").appendChild(div);
@@ -364,6 +475,22 @@ function addAudio(user,url){
 
 socket.on("audio",(url)=>{
   addAudio("Her",url);
+});
+function openImage(url){
+
+  const viewer=document.getElementById("viewer");
+  const img=document.getElementById("viewerImg");
+
+  img.src=url;
+
+  viewer.style.display="flex";
+}
+
+document.getElementById("viewer")
+.addEventListener("click",function(){
+
+  this.style.display="none";
+
 });
 </script>
 

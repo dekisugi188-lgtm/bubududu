@@ -38,12 +38,21 @@ app.post("/upload-audio", upload.single("audio"), (req, res) => {
 io.on("connection", (socket) => {
   console.log("User connected");
 
-  socket.on("join-room", (room) => {
-    socket.join(room);
-    socket.room = room;
+  socket.on("join-room",(room)=>{
 
-    socket.to(room).emit("status", "online");
-  });
+  socket.join(room);
+  socket.room=room;
+
+  const clients=
+  io.sockets.adapter.rooms.get(room);
+
+  if(clients && clients.size>=2){
+
+    io.to(room).emit("status","online");
+
+  }
+
+});
 
   // Text Messages
   socket.on("message", (msg) => {
@@ -73,11 +82,22 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("disconnect", () => {
-    if (socket.room) {
-      socket.to(socket.room).emit("status", "offline");
+  socket.on("disconnect",()=>{
+
+  if(socket.room){
+
+    const clients=
+    io.sockets.adapter.rooms.get(socket.room);
+
+    if(!clients || clients.size<=1){
+
+      socket.to(socket.room)
+            .emit("status","offline");
+
     }
-  });
+  }
+
+});
 });
 
 const PORT = process.env.PORT || 10000;
