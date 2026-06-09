@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>YT</title>
+
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+
+body{
+  font-family:Arial,sans-serif;
+  background:#0f172a;
+  color:white;
+}
+
+#login,#chat{
+  max-width:700px;
+  margin:auto;
+}
+
+#login{
+  padding:20px;
+  margin-top:50px;
+}
+
+input,button{
+  width:100%;
+  padding:12px;
+  margin-top:10px;
+  border:none;
+  border-radius:10px;
+}
+
+button{
+  background:#ec4899;
+  color:white;
+  cursor:pointer;
+}
+
+#chat{
+  display:none;
+  height:100vh;
+}
+
+.header{
+  position:sticky;
+  top:0;
+  background:#111827;
+  padding:15px;
+  z-index:100;
+  border-bottom:1px solid #334155;
+}
+
+#onlineStatus{
+  color:#4ade80;
+  margin-top:5px;
+  font-size:14px;
+}
+
+#messages{
+  height:65vh;
+  overflow-y:auto;
+  padding:10px;
+  display:flex;
+  flex-direction:column;
+}
+
+.message{
+  max-width:75%;
+  padding:10px;
+  margin:6px 0;
+  border-radius:12px;
+  word-wrap:break-word;
+}
+
+.me{
+  align-self:flex-end;
+  background:#22c55e;
+  color:black;
+}
+
+.her{
+  align-self:flex-start;
+  background:#1e293b;
+  color:white;
+}
+
+#typing{
+  padding:0 10px;
+  color:#c084fc;
+  min-height:20px;
+}
+
+.bottom{
+  padding:10px;
+}
+
+img{
+  max-width:220px;
+  border-radius:10px;
+  cursor:pointer;
+}
+
+audio{
+  width:100%;
+}
+
+@media(max-width:600px){
+  .message{
+    max-width:85%;
+  }
+
+  #messages{
+    height:60vh;
+  }
+}
+</style>
+</head>
+
+<body>
+
+<div id="login">
+  <h2>🔐 Enter Secret Password</h2>
+  <input id="room" type="password" placeholder="Same password for both 💖">
+  <button onclick="join()">Enter Chat</button>
+</div>
+
+<div id="chat">
+
+  <div class="header">
+    <h3>It US D&K --> AAPKA SWAAGAT H</h3>
+    <div id="onlineStatus">⚫ Partner Offline</div>
+  </div>
+
+  <div id="messages"></div>
+
+  <div id="typing"></div>
+
+  <div class="bottom">
+    <input id="msg" placeholder="Type message..." oninput="typing()">
+    <button onclick="send()">Send</button>
+
+    <input type="file" id="imageInput" accept="image/*">
+
+    <button id="recordBtn" onclick="startRecording()">
+      🎤 Start Recording
+    </button>
+  </div>
+
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+
+<script>
+const socket = io();
+let room="";
+
+function scrollToBottom(){
+  const messages=document.getElementById("messages");
+  messages.scrollTop=messages.scrollHeight;
+}
+
+function join(){
+  room=document.getElementById("room").value;
+
+  if(!room) return;
+
+  socket.emit("join-room",room);
+
+  document.getElementById("login").style.display="none";
+  document.getElementById("chat").style.display="block";
+}
+
+function send(){
+  const input=document.getElementById("msg");
+
+  if(!input.value.trim()) return;
+
+  socket.emit("message",input.value);
+
+  add("Me",input.value);
+
+  input.value="";
+}
+
+document.getElementById("msg").addEventListener("keydown",function(e){
+  if(e.key==="Enter"){
+    send();
+  }
+});
+
+function typing(){
+  socket.emit("typing");
+}
+
+socket.on("message",(msg)=>{
+  add("Her",msg);
+});
+
+socket.on("typing",()=>{
+  document.getElementById("typing").innerText="Typing...";
+
+  setTimeout(()=>{
+    document.getElementById("typing").innerText="";
+  },1000);
+});
+
+socket.on("status",(s)=>{
+
+  const status=document.getElementById("onlineStatus");
+
+  if(s==="online"){
+    status.innerHTML="🟢 Partner Online";
+  }else{
+    status.innerHTML="⚫ Partner Offline";
+  }
+
+});
+
+function add(user,text){
+
+  const div=document.createElement("div");
+
+  div.classList.add("message");
+
+  if(user==="Me"){
+    div.classList.add("me");
+  }else{
+    div.classList.add("her");
+  }
+
+  div.innerHTML=`<b>${user}</b><br>${text}`;
+
+  document.getElementById("messages").appendChild(div);
+
+  scrollToBottom();
+}
+
+document.getElementById("imageInput").addEventListener("change",async function(){
+
+  const file=this.files[0];
+
+  if(!file) return;
+
+  const formData=new FormData();
+  formData.append("image",file);
+
+  const res=await fetch("/upload-image",{
+    method:"POST",
+    body:formData
+  });
+
+  const data=await res.json();
+
+  addImage("Me",data.url);
+
+  socket.emit("image",data.url);
+});
+
+function addImage(user,url){
+
+  const div=document.createElement("div");
+
+  div.classList.add("message");
+
+  if(user==="Me"){
+    div.classList.add("me");
+  }else{
+    div.classList.add("her");
+  }
+
+  div.innerHTML=`
+  <b>${user}</b><br>
+  <img src="${url}" onclick="window.open('${url}','_blank')">
+  `;
+
+  document.getElementById("messages").appendChild(div);
+
+  scrollToBottom();
+}
+
+socket.on("image",(url)=>{
+  addImage("Her",url);
+});
+
+let recorder;
+let chunks=[];
+let isRecording=false;
+
+async function startRecording(){
+
+  const btn=document.getElementById("recordBtn");
+
+  if(!isRecording){
+
+    const stream=await navigator.mediaDevices.getUserMedia({
+      audio:true
+    });
+
+    recorder=new MediaRecorder(stream);
+
+    chunks=[];
+
+    recorder.ondataavailable=(e)=>{
+      chunks.push(e.data);
+    };
+
+    recorder.start();
+
+    isRecording=true;
+    btn.innerText="🔴 Recording...";
+
+  }else{
+
+    recorder.stop();
+
+    recorder.onstop=async()=>{
+
+      const blob=new Blob(chunks,{type:"audio/webm"});
+
+      const formData=new FormData();
+
+      formData.append("audio",blob,"voice.webm");
+
+      const res=await fetch("/upload-audio",{
+        method:"POST",
+        body:formData
+      });
+
+      const data=await res.json();
+
+      addAudio("Me",data.url);
+
+      socket.emit("audio",data.url);
+    };
+
+    isRecording=false;
+    btn.innerText="🎤 Start Recording";
+  }
+}
+
+function addAudio(user,url){
+
+  const div=document.createElement("div");
+
+  div.classList.add("message");
+
+  if(user==="Me"){
+    div.classList.add("me");
+  }else{
+    div.classList.add("her");
+  }
+
+  div.innerHTML=`
+  <b>${user}</b><br>
+  <audio controls src="${url}"></audio>
+  `;
+
+  document.getElementById("messages").appendChild(div);
+
+  scrollToBottom();
+}
+
+socket.on("audio",(url)=>{
+  addAudio("Her",url);
+});
+</script>
+
+</body>
+</html>
