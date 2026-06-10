@@ -81,6 +81,31 @@ io.on("connection", (socket) => {
       socket.to(socket.room).emit("typing");
     }
   });
+  // Voice Call Signaling
+
+socket.on("call-user", (offer) => {
+  if (socket.room) {
+    socket.to(socket.room).emit("incoming-call", offer);
+  }
+});
+
+socket.on("answer-call", (answer) => {
+  if (socket.room) {
+    socket.to(socket.room).emit("call-answered", answer);
+  }
+});
+
+socket.on("ice-candidate", (candidate) => {
+  if (socket.room) {
+    socket.to(socket.room).emit("ice-candidate", candidate);
+  }
+});
+
+socket.on("end-call", () => {
+  if (socket.room) {
+    socket.to(socket.room).emit("end-call");
+  }
+});
 
   socket.on("disconnect",()=>{
 
