@@ -426,6 +426,7 @@ document.getElementById("imageInput").addEventListener("change",async function()
 
   const formData=new FormData();
   formData.append("image",file);
+  formData.append("room",room);
 
   const res=await fetch("/upload-image",{
     method:"POST",
@@ -439,7 +440,9 @@ document.getElementById("imageInput").addEventListener("change",async function()
   socket.emit("image",data.url);
 });
 
-function addImage(user,url){
+function addImage(user,rawUrl){
+
+  const url = rawUrl + "?room=" + encodeURIComponent(room);
 
   const div=document.createElement("div");
 
@@ -503,6 +506,7 @@ async function startRecording(){
       const formData=new FormData();
 
       formData.append("audio",blob,"voice.webm");
+      formData.append("room",room);
 
       const res=await fetch("/upload-audio",{
         method:"POST",
@@ -521,7 +525,9 @@ async function startRecording(){
   }
 }
 
-function addAudio(user,url){
+function addAudio(user,rawUrl){
+
+  const url = rawUrl + "?room=" + encodeURIComponent(room);
 
   const div=document.createElement("div");
 
