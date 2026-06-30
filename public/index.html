@@ -135,6 +135,99 @@ details summary{
 details summary::-webkit-details-marker{
   display:none;
 }
+
+.callBtn{
+  width:auto;
+  display:inline-block;
+  padding:10px 14px;
+  margin:10px 6px 0 0;
+  background:#334155;
+  font-size:18px;
+}
+
+#callOverlay{
+  display:none;
+  position:fixed;
+  inset:0;
+  background:#0f172a;
+  z-index:9998;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  color:white;
+  text-align:center;
+}
+
+#callOverlay video{
+  border-radius:12px;
+  background:#000;
+}
+
+#remoteVideo{
+  width:90%;
+  max-width:500px;
+  max-height:50vh;
+}
+
+#localVideo{
+  width:120px;
+  position:absolute;
+  bottom:140px;
+  right:20px;
+  border-radius:10px;
+  border:2px solid #ec4899;
+}
+
+#callStatus{
+  margin:14px 0;
+  font-size:16px;
+  color:#c084fc;
+}
+
+#callControls{
+  display:flex;
+  gap:16px;
+  margin-top:20px;
+}
+
+#callControls button{
+  width:60px;
+  height:60px;
+  border-radius:50%;
+  font-size:22px;
+  margin:0;
+}
+
+.endBtn{ background:#ef4444 !important; }
+.acceptBtn{ background:#22c55e !important; }
+.muteBtn{ background:#475569 !important; }
+
+#incomingCallBanner{
+  display:none;
+  position:fixed;
+  top:10px;
+  left:50%;
+  transform:translateX(-50%);
+  background:#1e293b;
+  border:1px solid #ec4899;
+  padding:14px 18px;
+  border-radius:12px;
+  z-index:10000;
+  text-align:center;
+  width:90%;
+  max-width:320px;
+}
+
+#incomingCallBanner .row{
+  display:flex;
+  gap:10px;
+  margin-top:10px;
+}
+
+#incomingCallBanner button{
+  margin:0;
+  padding:10px;
+}
 </style>
 </head>
 <div id="viewer"
@@ -165,6 +258,10 @@ max-height:95%;">
   <div class="header">
     <h3>It US D&K --> AAPKA SWAAGAT H</h3>
     <div id="onlineStatus">⚫ Partner Offline</div>
+    <div>
+      <button class="callBtn" onclick="startCall('audio')">📞 Voice</button>
+      <button class="callBtn" onclick="startCall('video')">🎥 Video</button>
+    </div>
   </div>
 
   <div id="messages"></div>
@@ -198,6 +295,24 @@ style="
 max-width:95%;
 max-height:95%;">
 
+</div>
+
+<div id="incomingCallBanner">
+  <div id="incomingCallText">📞 Incoming call...</div>
+  <div class="row">
+    <button class="acceptBtn" onclick="acceptCall()">✅ Accept</button>
+    <button class="endBtn" onclick="rejectCall()">❌ Decline</button>
+  </div>
+</div>
+
+<div id="callOverlay">
+  <video id="remoteVideo" autoplay playsinline></video>
+  <video id="localVideo" autoplay playsinline muted></video>
+  <div id="callStatus">Calling...</div>
+  <div id="callControls">
+    <button class="muteBtn" id="muteBtn" onclick="toggleMute()">🎤</button>
+    <button class="endBtn" onclick="endCall()">📵</button>
+  </div>
 </div>
 
 <script src="/socket.io/socket.io.js"></script>
@@ -492,6 +607,192 @@ document.getElementById("viewer")
   this.style.display="none";
 
 });
+
+// ===================== WebRTC CALLING =====================
+
+const ICE_SERVERS = {
+  iceServers: [
+    { urls: "stun:stun.l.google.com:19302" },
+    { urls: "stun:stun1.l.google.com:19302" }
+  ]
+};
+
+let localStream = null;
+let peerConnection = null;
+let pendingOffer = null;
+let pendingCallType = null;
+let isCaller = false;
+let isMuted = false;
+
+const callOverlay = document.getElementById("callOverlay");
+const callStatus = document.getElementById("callStatus");
+const localVideoEl = document.getElementById("localVideo");
+const remoteVideoEl = document.getElementById("remoteVideo");
+const incomingBanner = document.getElementById("incomingCallBanner");
+const incomingText = document.getElementById("incomingCallText");
+const muteBtn = document.getElementById("muteBtn");
+
+function createPeerConnection(){
+  const pc = new RTCPeerConnection(ICE_SERVERS);
+
+  pc.onicecandidate = (e) => {
+    if(e.candidate){
+      socket.emit("ice-candidate", e.candidate);
+    }
+  };
+
+  pc.ontrack = (e) => {
+    remoteVideoEl.srcObject = e.streams[0];
+    callStatus.innerText = "Connected";
+  };
+
+  pc.onconnectionstatechange = () => {
+    if(pc.connectionState === "disconnected" || pc.connectionState === "failed"){
+      cleanupCall();
+    }
+  };
+
+  return pc;
+}
+
+async function startCall(type){
+  pendingCallType = type;
+  isCaller = true;
+
+  try{
+    localStream = await navigator.mediaDevices.getUserMedia({
+      video: type === "video",
+      audio: true
+    });
+  }catch(err){
+    alert("Could not access camera/mic: " + err.message);
+    return;
+  }
+
+  showCallOverlay(type);
+  localVideoEl.srcObject = localStream;
+  callStatus.innerText = "Calling...";
+
+  peerConnection = createPeerConnection();
+  localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+
+  const offer = await peerConnection.createOffer();
+  await peerConnection.setLocalDescription(offer);
+
+  socket.emit("call-user", { offer, callType: type });
+}
+
+socket.on("incoming-call", (data) => {
+  if(peerConnection){
+    // already in a call, auto-reject
+    socket.emit("reject-call");
+    return;
+  }
+  pendingOffer = data.offer;
+  pendingCallType = data.callType;
+  incomingText.innerText = (data.callType === "video" ? "🎥 Incoming video call..." : "📞 Incoming voice call...");
+  incomingBanner.style.display = "block";
+});
+
+async function acceptCall(){
+  incomingBanner.style.display = "none";
+  isCaller = false;
+
+  try{
+    localStream = await navigator.mediaDevices.getUserMedia({
+      video: pendingCallType === "video",
+      audio: true
+    });
+  }catch(err){
+    alert("Could not access camera/mic: " + err.message);
+    socket.emit("reject-call");
+    return;
+  }
+
+  showCallOverlay(pendingCallType);
+  localVideoEl.srcObject = localStream;
+  callStatus.innerText = "Connecting...";
+
+  peerConnection = createPeerConnection();
+  localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+
+  await peerConnection.setRemoteDescription(new RTCSessionDescription(pendingOffer));
+  const answer = await peerConnection.createAnswer();
+  await peerConnection.setLocalDescription(answer);
+
+  socket.emit("make-answer", { answer });
+  pendingOffer = null;
+}
+
+function rejectCall(){
+  incomingBanner.style.display = "none";
+  pendingOffer = null;
+  socket.emit("reject-call");
+}
+
+socket.on("answer-made", async (data) => {
+  if(peerConnection){
+    await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+    callStatus.innerText = "Connected";
+  }
+});
+
+socket.on("ice-candidate", async (candidate) => {
+  if(peerConnection){
+    try{
+      await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+    }catch(err){
+      console.error("ICE candidate error", err);
+    }
+  }
+});
+
+socket.on("call-rejected", () => {
+  callStatus.innerText = "Call declined";
+  setTimeout(cleanupCall, 1200);
+});
+
+socket.on("call-ended", () => {
+  callStatus.innerText = "Call ended";
+  setTimeout(cleanupCall, 800);
+});
+
+function showCallOverlay(type){
+  callOverlay.style.display = "flex";
+  localVideoEl.style.display = (type === "video") ? "block" : "none";
+  remoteVideoEl.style.display = (type === "video") ? "block" : "none";
+}
+
+function endCall(){
+  socket.emit("end-call");
+  cleanupCall();
+}
+
+function toggleMute(){
+  if(!localStream) return;
+  isMuted = !isMuted;
+  localStream.getAudioTracks().forEach(t => t.enabled = !isMuted);
+  muteBtn.innerText = isMuted ? "🔇" : "🎤";
+}
+
+function cleanupCall(){
+  if(peerConnection){
+    peerConnection.close();
+    peerConnection = null;
+  }
+  if(localStream){
+    localStream.getTracks().forEach(t => t.stop());
+    localStream = null;
+  }
+  localVideoEl.srcObject = null;
+  remoteVideoEl.srcObject = null;
+  callOverlay.style.display = "none";
+  incomingBanner.style.display = "none";
+  isMuted = false;
+  muteBtn.innerText = "🎤";
+  pendingOffer = null;
+  isCaller = false;
+}
 </script>
 
 </body>

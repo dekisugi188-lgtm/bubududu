@@ -82,6 +82,48 @@ io.on("connection", (socket) => {
     }
   });
 
+  // ---- WebRTC Call Signaling ----
+
+  // Caller starts a call (video or audio)
+  socket.on("call-user", (data) => {
+    if (socket.room) {
+      socket.to(socket.room).emit("incoming-call", {
+        offer: data.offer,
+        callType: data.callType
+      });
+    }
+  });
+
+  // Callee accepts and sends back an answer
+  socket.on("make-answer", (data) => {
+    if (socket.room) {
+      socket.to(socket.room).emit("answer-made", {
+        answer: data.answer
+      });
+    }
+  });
+
+  // Either side exchanges ICE candidates
+  socket.on("ice-candidate", (candidate) => {
+    if (socket.room) {
+      socket.to(socket.room).emit("ice-candidate", candidate);
+    }
+  });
+
+  // Callee rejects
+  socket.on("reject-call", () => {
+    if (socket.room) {
+      socket.to(socket.room).emit("call-rejected");
+    }
+  });
+
+  // Either side hangs up
+  socket.on("end-call", () => {
+    if (socket.room) {
+      socket.to(socket.room).emit("call-ended");
+    }
+  });
+
   socket.on("disconnect",()=>{
 
   if(socket.room){
