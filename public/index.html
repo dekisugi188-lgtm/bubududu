@@ -149,58 +149,136 @@ details summary::-webkit-details-marker{
   display:none;
   position:fixed;
   inset:0;
-  background:#0f172a;
+  background:#000;
   z-index:9998;
-  flex-direction:column;
-  align-items:center;
-  justify-content:center;
   color:white;
   text-align:center;
+  overflow:hidden;
 }
 
-#callOverlay video{
-  border-radius:12px;
-  background:#000;
-}
-
+/* Remote video fills the entire screen */
 #remoteVideo{
-  width:90%;
-  max-width:500px;
-  max-height:50vh;
+  position:absolute;
+  inset:0;
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  background:#000;
+  border-radius:0;
 }
 
-#localVideo{
-  width:120px;
+/* Local self-preview: floating picture-in-picture, like WhatsApp/FaceTime/Meet */
+#localVideoWrap{
   position:absolute;
-  bottom:140px;
-  right:20px;
-  border-radius:10px;
-  border:2px solid #ec4899;
+  top:calc(env(safe-area-inset-top, 0px) + 16px);
+  right:16px;
+  width:96px;
+  height:130px;
+  border-radius:14px;
+  overflow:hidden;
+  border:2px solid rgba(255,255,255,0.55);
+  background:#1e293b;
+  z-index:9999;
+  box-shadow:0 4px 14px rgba(0,0,0,0.5);
+  transition:opacity .2s;
+}
+
+#localVideoWrap video{
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  border-radius:0;
+  background:#1e293b;
+  /* Mirror ONLY the local self-view so it feels natural — this is purely
+     a visual/CSS flip and does not affect the actual outgoing stream. */
+  transform:scaleX(-1);
+}
+
+/* When camera is off, hide the frozen frame and show a placeholder icon */
+#localVideoWrap.cam-off video{
+  visibility:hidden;
+}
+#localVideoWrap.cam-off::after{
+  content:"🚫";
+  position:absolute;
+  inset:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:26px;
+}
+
+@media(min-width:700px){
+  #localVideoWrap{
+    width:170px;
+    height:230px;
+    top:24px;
+    right:24px;
+  }
+}
+
+#callTopBar{
+  position:absolute;
+  top:0;
+  left:0;
+  right:0;
+  padding:16px 18px;
+  z-index:9999;
+  background:linear-gradient(to bottom, rgba(0,0,0,0.55), transparent);
+  text-align:left;
 }
 
 #callStatus{
-  margin:14px 0;
-  font-size:16px;
-  color:#c084fc;
+  margin:0;
+  font-size:15px;
+  color:#e2e8f0;
 }
 
 #callControls{
+  position:absolute;
+  bottom:calc(env(safe-area-inset-bottom, 0px) + 26px);
+  left:0;
+  right:0;
   display:flex;
-  gap:16px;
-  margin-top:20px;
+  justify-content:center;
+  align-items:center;
+  gap:14px;
+  z-index:9999;
+  flex-wrap:wrap;
+  padding:0 12px;
 }
 
 #callControls button{
-  width:60px;
-  height:60px;
+  width:56px;
+  height:56px;
   border-radius:50%;
   font-size:22px;
   margin:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  background:rgba(255,255,255,0.16);
+  backdrop-filter:blur(6px);
+  border:1px solid rgba(255,255,255,0.25);
+  flex:0 0 auto;
 }
 
-.endBtn{ background:#ef4444 !important; }
+.endBtn{ background:#ef4444 !important; border-color:#ef4444 !important; }
 .acceptBtn{ background:#22c55e !important; }
-.muteBtn{ background:#475569 !important; }
+.muteBtn.active-off,
+.camBtn.active-off{ background:#ef4444 !important; border-color:#ef4444 !important; }
+
+@media(max-width:420px){
+  #callControls button{
+    width:50px;
+    height:50px;
+    font-size:19px;
+  }
+  #localVideoWrap{
+    width:84px;
+    height:114px;
+  }
+}
 
 #incomingCallBanner{
   display:none;
@@ -248,15 +326,15 @@ max-height:95%;">
 <body>
 
 <div id="login">
-  <h2>🔐 Enter Secret Password</h2>
-  <input id="room" type="password" placeholder="Same password for both 💖">
+  <h2>Write Something..</h2>
+  <input id="room" type="password" placeholder="Write Correctly..">
   <button onclick="join()">Enter Chat</button>
 </div>
 
 <div id="chat">
 
   <div class="header">
-    <h3>It US D&K --> AAPKA SWAAGAT H</h3>
+    <h3>--Welcome--</h3>
     <div id="onlineStatus">⚫ Partner Offline</div>
     <div>
       <button class="callBtn" onclick="startCall('audio')">📞 Voice</button>
@@ -307,11 +385,21 @@ max-height:95%;">
 
 <div id="callOverlay">
   <video id="remoteVideo" autoplay playsinline></video>
-  <video id="localVideo" autoplay playsinline muted></video>
-  <div id="callStatus">Calling...</div>
+
+  <div id="localVideoWrap">
+    <video id="localVideo" autoplay playsinline muted></video>
+  </div>
+
+  <div id="callTopBar">
+    <div id="callStatus">Calling...</div>
+  </div>
+
   <div id="callControls">
-    <button class="muteBtn" id="muteBtn" onclick="toggleMute()">🎤</button>
-    <button class="endBtn" onclick="endCall()">📵</button>
+    <button class="muteBtn" id="muteBtn" onclick="toggleMute()" title="Mute/Unmute">🎤</button>
+    <button class="camBtn" id="camBtn" onclick="toggleCamera()" title="Camera On/Off">📷</button>
+    <button id="switchCamBtn" onclick="switchCamera()" title="Switch Camera">🔄</button>
+    <button id="fullscreenBtn" onclick="toggleFullscreen()" title="Fullscreen">⛶</button>
+    <button class="endBtn" onclick="endCall()" title="End Call">📵</button>
   </div>
 </div>
 
@@ -629,14 +717,21 @@ let pendingOffer = null;
 let pendingCallType = null;
 let isCaller = false;
 let isMuted = false;
+let isCameraOff = false;
+let currentFacingMode = "user";
+let canSwitchCamera = false;
 
 const callOverlay = document.getElementById("callOverlay");
 const callStatus = document.getElementById("callStatus");
+const localVideoWrap = document.getElementById("localVideoWrap");
 const localVideoEl = document.getElementById("localVideo");
 const remoteVideoEl = document.getElementById("remoteVideo");
 const incomingBanner = document.getElementById("incomingCallBanner");
 const incomingText = document.getElementById("incomingCallText");
 const muteBtn = document.getElementById("muteBtn");
+const camBtn = document.getElementById("camBtn");
+const switchCamBtn = document.getElementById("switchCamBtn");
+const fullscreenBtn = document.getElementById("fullscreenBtn");
 
 function createPeerConnection(){
   const pc = new RTCPeerConnection(ICE_SERVERS);
@@ -763,10 +858,31 @@ socket.on("call-ended", () => {
   setTimeout(cleanupCall, 800);
 });
 
-function showCallOverlay(type){
-  callOverlay.style.display = "flex";
-  localVideoEl.style.display = (type === "video") ? "block" : "none";
-  remoteVideoEl.style.display = (type === "video") ? "block" : "none";
+async function showCallOverlay(type){
+  callOverlay.style.display = "block";
+
+  const isVideo = type === "video";
+  localVideoWrap.style.display = isVideo ? "block" : "none";
+  camBtn.style.display = isVideo ? "flex" : "none";
+
+  // Reset per-call state
+  isCameraOff = false;
+  camBtn.textContent = "📷";
+  camBtn.classList.remove("active-off");
+  localVideoWrap.classList.remove("cam-off");
+
+  // Only show "switch camera" if it's a video call and more than one camera exists
+  switchCamBtn.style.display = "none";
+  if(isVideo){
+    try{
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const cams = devices.filter(d => d.kind === "videoinput");
+      canSwitchCamera = cams.length > 1;
+      switchCamBtn.style.display = canSwitchCamera ? "flex" : "none";
+    }catch(err){
+      canSwitchCamera = false;
+    }
+  }
 }
 
 function endCall(){
@@ -779,6 +895,61 @@ function toggleMute(){
   isMuted = !isMuted;
   localStream.getAudioTracks().forEach(t => t.enabled = !isMuted);
   muteBtn.innerText = isMuted ? "🔇" : "🎤";
+  muteBtn.classList.toggle("active-off", isMuted);
+}
+
+// Turns the outgoing video track on/off without touching the call itself
+function toggleCamera(){
+  if(!localStream) return;
+  isCameraOff = !isCameraOff;
+  localStream.getVideoTracks().forEach(t => t.enabled = !isCameraOff);
+  camBtn.textContent = isCameraOff ? "🚫" : "📷";
+  camBtn.classList.toggle("active-off", isCameraOff);
+  localVideoWrap.classList.toggle("cam-off", isCameraOff);
+}
+
+// Switches between front/rear camera mid-call using replaceTrack so the
+// existing peer connection stays alive (no renegotiation/reconnect needed)
+async function switchCamera(){
+  if(!localStream || !peerConnection || !canSwitchCamera) return;
+
+  const nextFacing = currentFacingMode === "user" ? "environment" : "user";
+
+  try{
+    const newStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { exact: nextFacing } },
+      audio: false
+    });
+
+    const newVideoTrack = newStream.getVideoTracks()[0];
+    const sender = peerConnection.getSenders().find(s => s.track && s.track.kind === "video");
+
+    if(sender && sender.replaceTrack){
+      await sender.replaceTrack(newVideoTrack);
+    }
+
+    // Stop the old video track and swap it into localStream
+    const oldVideoTrack = localStream.getVideoTracks()[0];
+    if(oldVideoTrack){
+      localStream.removeTrack(oldVideoTrack);
+      oldVideoTrack.stop();
+    }
+    localStream.addTrack(newVideoTrack);
+    newVideoTrack.enabled = !isCameraOff;
+
+    localVideoEl.srcObject = localStream;
+    currentFacingMode = nextFacing;
+  }catch(err){
+    alert("Could not switch camera: " + err.message);
+  }
+}
+
+function toggleFullscreen(){
+  if(!document.fullscreenElement){
+    (callOverlay.requestFullscreen ? callOverlay.requestFullscreen() : Promise.resolve()).catch(() => {});
+  }else{
+    document.exitFullscreen && document.exitFullscreen().catch(() => {});
+  }
 }
 
 function cleanupCall(){
@@ -792,10 +963,24 @@ function cleanupCall(){
   }
   localVideoEl.srcObject = null;
   remoteVideoEl.srcObject = null;
+
+  if(document.fullscreenElement){
+    document.exitFullscreen && document.exitFullscreen().catch(() => {});
+  }
+
   callOverlay.style.display = "none";
   incomingBanner.style.display = "none";
+
   isMuted = false;
   muteBtn.innerText = "🎤";
+  muteBtn.classList.remove("active-off");
+
+  isCameraOff = false;
+  camBtn.textContent = "📷";
+  camBtn.classList.remove("active-off");
+  localVideoWrap.classList.remove("cam-off");
+
+  currentFacingMode = "user";
   pendingOffer = null;
   isCaller = false;
 }
