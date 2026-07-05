@@ -7,10 +7,10 @@
 
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-
+/* #ec4899 ,#0f172a*/
 body{
   font-family:Arial,sans-serif;
-  background:#0f172a;
+  background:#1e293b;
   color:white;
 }
 
@@ -33,7 +33,7 @@ input,button{
 }
 
 button{
-  background:#ec4899;
+  background:rgb(165, 165, 27);
   color:white;
   cursor:pointer;
 }
@@ -47,10 +47,10 @@ button{
 .header{
   position:sticky;
   top:0;
-  background:#111827;
+  background:#1e293b;
   padding:15px;
   z-index:100;
-  border-bottom:1px solid #334155;
+  border-bottom:1px solid #0b24a1;
 }
 
 #onlineStatus{
@@ -70,7 +70,7 @@ button{
 .bottom{
   position:sticky;
   bottom:0;
-  background:#0f172a;
+  background:#1e293b;
   padding:10px;
 }
 
@@ -84,13 +84,13 @@ button{
 
 .me{
   align-self:flex-end;
-  background:#22c55e;
-  color:black;
+  background:#131413;
+  color:rgb(160, 157, 157);
 }
 
 .her{
   align-self:flex-start;
-  background:#1e293b;
+  background:#959dab;
   color:white;
 }
 
@@ -704,10 +704,38 @@ document.getElementById("viewer")
 
 // ===================== WebRTC CALLING =====================
 
+// NOTE ON TURN: STUN-only setups (like the previous one) only help two peers
+// discover their public IP/port. That works fine on a LAN or when both sides
+// have "easy" NAT types. The moment this app is used over the real internet
+// (Render deployment, two different home/mobile networks, carrier-grade NAT,
+// symmetric NAT, hotel/campus wifi, etc.) a large fraction of connections
+// cannot be established peer-to-peer at all — STUN can't fix that, only a
+// TURN relay can. Without TURN, the call can still finish signaling
+// (offer/answer/ICE candidates exchanged, "Connected" text shown) while the
+// actual media path never comes up, which matches the reported symptom of
+// "reaches Connected but no audio/video". The openrelay.metered.ca servers
+// below are a free public TURN service suitable for testing — replace them
+// with your own TURN credentials (Twilio, Xirsys, metered.ca, coturn, etc.)
+// for production use, since free/public TURN has no uptime guarantees.
 const ICE_SERVERS = {
   iceServers: [
     { urls: "stun:stun.l.google.com:19302" },
-    { urls: "stun:stun1.l.google.com:19302" }
+    { urls: "stun:stun1.l.google.com:19302" },
+    {
+      urls: "turn:openrelay.metered.ca:80",
+      username: "openrelayproject",
+      credential: "openrelayproject"
+    },
+    {
+      urls: "turn:openrelay.metered.ca:443",
+      username: "openrelayproject",
+      credential: "openrelayproject"
+    },
+    {
+      urls: "turn:openrelay.metered.ca:443?transport=tcp",
+      username: "openrelayproject",
+      credential: "openrelayproject"
+    }
   ]
 };
 
@@ -720,6 +748,29 @@ let isMuted = false;
 let isCameraOff = false;
 let currentFacingMode = "user";
 let canSwitchCamera = false;
+
+// ---- ICE candidate queueing ----
+// Root-cause fix: candidates can legitimately arrive from the other side
+// before our RTCPeerConnection exists (e.g. the callee hasn't tapped
+// "Accept" yet) or before setRemoteDescription() has completed on our side.
+// addIceCandidate() requires a remote description to already be set, so any
+// candidate that arrives too early MUST be queued and replayed afterwards
+// instead of being silently dropped.
+let remoteDescriptionSet = false;
+let queuedRemoteCandidates = [];
+
+async function flushQueuedCandidates(){
+  if(!peerConnection) return;
+  const queue = queuedRemoteCandidates;
+  queuedRemoteCandidates = [];
+  for(const candidate of queue){
+    try{
+      await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+    }catch(err){
+      console.error("Queued ICE candidate error", err);
+    }
+  }
+}
 
 const callOverlay = document.getElementById("callOverlay");
 const callStatus = document.getElementById("callStatus");
@@ -743,11 +794,29 @@ function createPeerConnection(){
   };
 
   pc.ontrack = (e) => {
-    remoteVideoEl.srcObject = e.streams[0];
+    if(remoteVideoEl.srcObject !== e.streams[0]){
+      remoteVideoEl.srcObject = e.streams[0];
+    }
+    // Explicitly (re)start playback. Assigning srcObject alone relies on the
+    // "autoplay" attribute, and browsers can block autoplay of media that
+    // has audio if they don't think there was a recent enough user gesture.
+    // Since the button tap that started/accepted the call already counts as
+    // a gesture this normally succeeds, but we still call play() ourselves
+    // and swallow/log any rejection instead of leaving the element silently
+    // stuck paused with a black frame.
+    const playPromise = remoteVideoEl.play();
+    if(playPromise && playPromise.catch){
+      playPromise.catch(err => console.warn("Remote play() blocked:", err));
+    }
     callStatus.innerText = "Connected";
   };
 
+  pc.oniceconnectionstatechange = () => {
+    console.log("ICE connection state:", pc.iceConnectionState);
+  };
+
   pc.onconnectionstatechange = () => {
+    console.log("Connection state:", pc.connectionState);
     if(pc.connectionState === "disconnected" || pc.connectionState === "failed"){
       cleanupCall();
     }
@@ -759,6 +828,8 @@ function createPeerConnection(){
 async function startCall(type){
   pendingCallType = type;
   isCaller = true;
+  remoteDescriptionSet = false;
+  queuedRemoteCandidates = [];
 
   try{
     localStream = await navigator.mediaDevices.getUserMedia({
@@ -791,6 +862,8 @@ socket.on("incoming-call", (data) => {
   }
   pendingOffer = data.offer;
   pendingCallType = data.callType;
+  remoteDescriptionSet = false;
+  queuedRemoteCandidates = [];
   incomingText.innerText = (data.callType === "video" ? "🎥 Incoming video call..." : "📞 Incoming voice call...");
   incomingBanner.style.display = "block";
 });
@@ -818,6 +891,9 @@ async function acceptCall(){
   localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
 
   await peerConnection.setRemoteDescription(new RTCSessionDescription(pendingOffer));
+  remoteDescriptionSet = true;
+  await flushQueuedCandidates();
+
   const answer = await peerConnection.createAnswer();
   await peerConnection.setLocalDescription(answer);
 
@@ -828,23 +904,38 @@ async function acceptCall(){
 function rejectCall(){
   incomingBanner.style.display = "none";
   pendingOffer = null;
+  remoteDescriptionSet = false;
+  queuedRemoteCandidates = [];
   socket.emit("reject-call");
 }
 
 socket.on("answer-made", async (data) => {
   if(peerConnection){
     await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+    remoteDescriptionSet = true;
+    await flushQueuedCandidates();
+    // NOTE: this only means the SDP answer was received, not that media is
+    // actually flowing yet — real connectivity is reflected by
+    // pc.connectionState / pc.iceConnectionState (see console logs) and by
+    // ontrack firing, which updates this same status text again.
     callStatus.innerText = "Connected";
   }
 });
 
 socket.on("ice-candidate", async (candidate) => {
-  if(peerConnection){
+  // If we don't have a peer connection yet (e.g. we haven't tapped
+  // "Accept" yet) or we have one but haven't set the remote description
+  // yet (e.g. the answer/offer hasn't arrived or finished applying),
+  // addIceCandidate() would throw. Queue it and replay once ready instead
+  // of losing it — this was the main reason media never connected.
+  if(peerConnection && remoteDescriptionSet){
     try{
       await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
     }catch(err){
       console.error("ICE candidate error", err);
     }
+  }else{
+    queuedRemoteCandidates.push(candidate);
   }
 });
 
@@ -983,6 +1074,9 @@ function cleanupCall(){
   currentFacingMode = "user";
   pendingOffer = null;
   isCaller = false;
+
+  remoteDescriptionSet = false;
+  queuedRemoteCandidates = [];
 }
 </script>
 
