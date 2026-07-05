@@ -82,25 +82,41 @@ app.get("/file/:filename", (req, res) => {
 });
 
 io.on("connection", (socket) => {
-  console.log("User connected");
+  console.log("User connected:", socket.id);
 
-  socket.on("join-room",(room)=>{
+  // =========================
+  // Join Room
+  // =========================
+  socket.on("join-room", (room) => {
+    socket.join(room);
+    socket.room = room;
 
-  socket.join(room);
-  socket.room=room;
+    console.log(`${socket.id} joined ${room}`);
 
-  const clients=
-  io.sockets.adapter.rooms.get(room);
+    const clients = io.sockets.adapter.rooms.get(room);
 
-  if(clients && clients.size>=2){
+    if (clients && clients.size >= 2) {
+      io.to(room).emit("status", "online");
+    }
+  });
 
-    io.to(room).emit("status","online");
+  // =========================
+  // Leave Room (called before refresh/close)
+  // =========================
+  socket.on("leave-room", () => {
+    if (!socket.room) return;
 
-  }
+    console.log(`${socket.id} left ${socket.room}`);
 
-});
+    socket.to(socket.room).emit("status", "offline");
 
+    socket.leave(socket.room);
+    socket.room = null;
+  });
+
+  // =========================
   // Text Messages
+  // =========================
   socket.on("message", (msg) => {
     if (socket.room) {
       socket.to(socket.room).emit("message", msg);
@@ -128,9 +144,10 @@ io.on("connection", (socket) => {
     }
   });
 
-  // ---- WebRTC Call Signaling ----
+  // =========================
+  // WebRTC Signaling
+  // =========================
 
-  // Caller starts a call (video or audio)
   socket.on("call-user", (data) => {
     if (socket.room) {
       socket.to(socket.room).emit("incoming-call", {
@@ -140,7 +157,6 @@ io.on("connection", (socket) => {
     }
   });
 
-  // Callee accepts and sends back an answer
   socket.on("make-answer", (data) => {
     if (socket.room) {
       socket.to(socket.room).emit("answer-made", {
@@ -149,43 +165,35 @@ io.on("connection", (socket) => {
     }
   });
 
-  // Either side exchanges ICE candidates
   socket.on("ice-candidate", (candidate) => {
     if (socket.room) {
       socket.to(socket.room).emit("ice-candidate", candidate);
     }
   });
 
-  // Callee rejects
   socket.on("reject-call", () => {
     if (socket.room) {
       socket.to(socket.room).emit("call-rejected");
     }
   });
 
-  // Either side hangs up
   socket.on("end-call", () => {
     if (socket.room) {
       socket.to(socket.room).emit("call-ended");
     }
   });
 
-  socket.on("disconnect",()=>{
+  // =========================
+  // Disconnect
+  // =========================
+  socket.on("disconnect", () => {
+    console.log("Disconnected:", socket.id);
 
-  if(socket.room){
+    if (!socket.room) return;
 
-    const clients=
-    io.sockets.adapter.rooms.get(socket.room);
-
-    if(!clients || clients.size<=1){
-
-      socket.to(socket.room)
-            .emit("status","offline");
-
-    }
-  }
-
-});
+    socket.to(socket.room).emit("status", "offline");
+  });
+ 
 });
 
 const PORT = process.env.PORT || 10000;
